@@ -61,44 +61,74 @@ function draft(mode='manual'){
  if((!automatic&&(!weightField.value||!holeField.value))||!Number.isFinite(w)||w<=0||!Number.isInteger(h)||h<1||h>38){
    output.textContent=automatic?'No reliable hole/weight estimate for this speed. Verify exact hole and grams from the AMM.':'Enter confirmed effective grams and reference hole from the current approved AMM first.';return;
  }
- // An illustrative vector comparison using the confirmed target and existing screws.
- // This is not a validated rotor-response or AMM screw-location algorithm.
+ // Geometric vector search only. This does NOT implement AMM installability or rotor response.
  const step=2*Math.PI/38, angle=i=>(i-1)*step;
- const candidateHoles=Array.from({length:7},(_,i)=>(h+i-3+38-1)%38+1);
- const candidates=[];
- for(const hole of candidateHoles){
-  const old=installed[hole-1];
-  for(let replacement=0;replacement<P.length;replacement++){
-   if(replacement===old)continue;
-   const delta=eff[replacement]-eff[old];
-   candidates.push({hole,old,replacement,delta,x:delta*Math.cos(angle(hole)),y:delta*Math.sin(angle(hole))});
-  }
- }
  const tx=w*Math.cos(angle(h)),ty=w*Math.sin(angle(h));
- let best=[];
- const saveCandidate=(items,x,y)=>{
-   const residual=Math.hypot(x-tx,y-ty);
-   const score=residual+items.length*0.35;
-   if(best.length===3&&score>=best[2].score)return;
-   best.push({items:[...items],x,y,residual,score});
-   best.sort((a,b)=>a.score-b.score);
-   best=best.slice(0,3);
- };
- // Up to 3 replacements; never reuse a hole in one proposal.
- for(let i=0;i<candidates.length;i++){
-   const a=candidates[i];saveCandidate([a],a.x,a.y);
-   for(let j=i+1;j<candidates.length;j++){
-    const b=candidates[j];if(a.hole===b.hole)continue;
-    saveCandidate([a,b],a.x+b.x,a.y+b.y);
-    for(let k=j+1;k<candidates.length;k++){
-     const c=candidates[k];if(c.hole===a.hole||c.hole===b.hole)continue;
-     saveCandidate([a,b,c],a.x+b.x+c.x,a.y+b.y+c.y);
-    }
+ const circularDistance=(hole)=>Math.min((hole-h+38)%38,(h-hole+38)%38);
+ const ordered=Array.from({length:38},(_,i)=>i+1).sort((a,b)=>circularDistance(a)-circularDistance(b)||a-b);
+ const WIDTH=420;
+ const optionsFor=(hole)=>{
+   const old=installed[hole-1];
+   const opts=[null]; // Retain installed screw; no mandatory substitution.
+   for(let replacement=0;replacement<P.length;replacement++){
+     if(replacement===old)continue;
+     const delta=eff[replacement]-eff[old];
+     opts.push({hole,old,replacement,delta,x:delta*Math.cos(angle(hole)),y:delta*Math.sin(angle(hole))});
    }
+   return opts;
+ };
+ const beamSearch=(radius)=>{
+   const holes=ordered.filter(hole=>circularDistance(hole)<=radius);
+   let states=[{x:0,y:0,items:[],distanceCost:0}];
+   const rank=(s,targetFraction)=>Math.hypot(s.x-tx*targetFraction,s.y-ty*targetFraction)+s.items.length*0.10+s.distanceCost*0.025;
+   for(let i=0;i<holes.length;i++){
+     const hole=holes[i],opts=optionsFor(hole);
+     const expanded=[];
+     for(const st of states)for(const op of opts){
+       if(!op){expanded.push(st);continue;}
+       expanded.push({x:st.x+op.x,y:st.y+op.y,items:[...st.items,op],distanceCost:st.distanceCost+circularDistance(hole)});
+     }
+     // Two beams: preserve direct-to-target states and balanced partial-build states.
+     // This avoids pruning necessary multi-screw corrections prematurely.
+     const progress=Math.min(1,(i+1)/Math.min(7,holes.length));
+     const select=(fraction,quota)=>{
+       const ranked=expanded.map(st=>({st,rank:rank(st,fraction)})).sort((a,b)=>a.rank-b.rank);
+       const picked=[],seen=new Set();
+       for(const {st} of ranked){
+         const key=Math.round(st.x*8)+'|'+Math.round(st.y*8)+'|'+st.items.length;
+         if(seen.has(key))continue;
+         seen.add(key);picked.push(st);
+         if(picked.length>=quota)break;
+       }
+       return picked;
+     };
+     const merged=[...select(1,Math.ceil(WIDTH/2)),...select(progress,Math.ceil(WIDTH/2))];
+     states=[];const seen=new Set();
+     for(const st of merged){const key=Math.round(st.x*8)+'|'+Math.round(st.y*8)+'|'+st.items.length;if(seen.has(key))continue;seen.add(key);states.push(st)}
+   }
+   return states.filter(s=>s.items.length>0).map(s=>({...s,residual:Math.hypot(s.x-tx,s.y-ty)}))
+      .sort((a,b)=>a.residual-b.residual||a.items.length-b.items.length||a.distanceCost-b.distanceCost);
+ };
+ // Expand the neighborhood when a closer vector is needed. Up to all 38 holes are eligible.
+ const tolerance=Math.max(0.5,w*0.015);
+ let best=[],searchRadius=3;
+ for(const radius of [3,5,8,12,19]){
+   const found=beamSearch(radius);
+   if(found.length){best=found;searchRadius=radius;}
+   if(best.length&&best[0].residual<=tolerance)break;
  }
  const esc=t=>String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;');
- const entries=best.map((r,i)=>`<div style="margin-top:15px;padding-top:12px;border-top:1px solid #397359"><h3>Vector comparison ${i+1} · residual ${fmt(r.residual)} g</h3><div class="list">${r.items.map(m=>`<div class="change"><b>Hole ${m.hole}</b><span>${esc(P[m.old])} → ${esc(P[m.replacement])}</span><b>${m.delta>0?'+':''}${fmt(m.delta)} g</b></div>`).join('')}</div><p class="muted">Calculated example vector ${fmt(Math.hypot(r.x,r.y))} g. Signed weight difference is measured against the entered installed inventory.</p></div>`).join('');
- output.innerHTML=`<h2 style="margin-top:12px">${automatic?'Screw-weight examples centered at hole '+h:'Illustrative verified-target comparisons'}</h2><p>Mathematical target: <b>${fmt(w)} effective g</b> at preliminary center hole <b>${h}</b>. Comparison window: ${[h-3,h-2,h-1,h,h+1,h+2,h+3].map(n=>(n+37)%38+1).join(' · ')} (wraps at 38). Up to three substitutions are compared against the <b>confirmed installed inventory</b>. These are only geometric approximations; no validated engine response or approved AMM installability checks are implemented.</p><p style="border:1px solid #54b991;border-radius:10px;padding:12px 14px;font-size:16px;font-weight:800;background:#104233">VERIFICATION RUN NECESSARY — Record the resulting vibration and phase after the correction, and re-evaluate using the current approved AMM procedure.</p>${entries}<p class="warn" style="margin-top:14px"><b>NOT AN AIRCRAFT INSTALLATION SOLUTION.</b> ${automatic?'Weight and center hole are estimated from partial chart data; they must not drive maintenance actions.':'Even with verified target values, the combination algorithm has not been validated against the procedure.'} Confirm the exact controlled AMM chart and approved configuration/steps with authorized maintenance personnel. Residual values represent arithmetic only, not predicted engine vibration.</p>`;
+ // Show distinct combinations, not near-duplicate ordering of the same change set.
+ const unique=[];const seen=new Set();
+ for(const r of best){
+   const signature=r.items.map(m=>m.hole+':'+m.replacement).sort().join('|');
+   if(seen.has(signature))continue;seen.add(signature);unique.push(r);
+   if(unique.length>=3)break;
+ }
+ const entries=unique.map((r,i)=>`<div style="margin-top:15px;padding-top:12px;border-top:1px solid #397359"><h3>Vector comparison ${i+1} · residual ${fmt(r.residual)} g · ${r.items.length} screw change(s)</h3><div class="list">${r.items.slice().sort((a,b)=>circularDistance(a.hole)-circularDistance(b.hole)||a.hole-b.hole).map(m=>`<div class="change"><b>Hole ${m.hole}</b><span>${esc(P[m.old])} → ${esc(P[m.replacement])}</span><b>${m.delta>0?'+':''}${fmt(m.delta)} g</b></div>`).join('')}</div><p class="muted">Calculated example vector ${fmt(Math.hypot(r.x,r.y))} g · vector residual ${fmt(r.residual)} g (${fmt(r.residual/w*100)}% of target). Signed weight differences are relative to the confirmed installed inventory.</p></div>`).join('');
+ const nearEnough=unique.length>0&&unique[0].residual<=tolerance;
+ const searchHoles=ordered.filter(n=>circularDistance(n)<=searchRadius).sort((a,b)=>a-b);
+ output.innerHTML=`<h2 style="margin-top:12px">${automatic?'Centered screw-vector comparisons around hole '+h:'Verified-target geometric comparisons'}</h2><p>Mathematical target: <b>${fmt(w)} effective g</b> at ${automatic?'preliminary':'entered'} center hole <b>${h}</b>. Search considered <b>${searchHoles.length} of 38 holes</b>, extending outward from the center as necessary. <b>No fixed three-screw limit.</b> Uses confirmed installed inventory, but results are unvalidated geometric calculations.</p><p style="border:1px solid #54b991;border-radius:10px;padding:12px 14px;font-size:16px;font-weight:800;background:#104233">VERIFICATION RUN NECESSARY — Record vibration and phase after any approved correction and re-evaluate using the current approved AMM.</p><p class="muted"><b>${nearEnough?'Numerical match found within an illustrative '+fmt(tolerance)+' g search tolerance.':'No close numerical match found within the illustrative '+fmt(tolerance)+' g tolerance.'}</b> A mathematical match is not evidence of AMM compliance, safe installation, or predicted vibration response.</p>${entries||'<p>No candidate screw-change comparison found.</p>'}<p class="warn" style="margin-top:14px"><b>NOT AN AIRCRAFT INSTALLATION SOLUTION.</b> ${automatic?'The target weight and center hole are estimated from partial chart data.':'The screw-change search is not validated against approved installation restrictions.'} Confirm effectivity, exact table values, screw-placement rules, configurations and required checks against the current controlled AMM. Never install based on these examples alone.</p>`;
 }
 
 for(let s=88;s<=107;s++){$('n1').add(new Option(`${s}% · ${rpm[s-88].toLocaleString()} RPM`,s));} $('n1').value='100';
