@@ -81,6 +81,7 @@ body::before {
 <section id="inventory"><div class="card"><h2>Installed spinner screws</h2><p class="muted">All 38 positions start as P07/P14 in the sample inventory. This is a default, not confirmation of actual installed hardware. Select a hole, then set its currently installed screw. Confirm every actual installed screw before using comparisons. Saved on this device; reset and export are available.</p><div id="holes" class="holes"></div><div class="grid" style="margin-top:15px"><div><label for="holeInput">Selected hole</label><select id="holeInput"></select></div><div><label for="partInput">Installed P-number</label><select id="partInput"></select></div></div><div class="actions" style="margin-top:12px"><button class="btn" id="savePart">Save hole</button><button class="btn" id="reset">Reset 38</button></div><button class="btn primary" id="confirmInventory" type="button">CONFIRM INSTALLED WEIGHTS &amp; RETURN</button><button class="btn" id="export" style="margin-top:11px;width:100%">Copy inventory</button><p id="inventoryStatus" class="muted"></p></div></section>
 <section id="manual"><div class="card"><h2>AMM source figures · PDF pages 51–64</h2><p class="muted">Images removed to allow reliable GitHub mobile upload. Refer to the controlled AMM for these figures. Calculated values remain unverified worksheet estimates.</p><div><label for="fig">Source figure</label><select id="fig"><option value="60">Figure 523 · correction grams 88–97%</option><option value="61">Figure 524 · correction grams 98–107%</option><option value="62">Figure 525 · hole location 88–97%</option><option value="63">Figure 526 · hole location 98–106%</option><option value="64">Figure 527 · screw weights</option></select></div><div class="result" id="figureNote">Reference images removed from lightweight GitHub version. Consult controlled AMM Figures 523–527 for exact values.</div><p class="muted">Procedure context: PDF pp. 51–57. Source figures: pp. 60–64. Figure 528 and Figure 511 are outside the user-selected range and are not used here.</p></div></section>
 <footer>MD-11 GE fan balance worksheet · AMM source PDF pages 51–64</footer>
+<div style="margin:20px 0 8px;padding:16px;background:#142b25;border:1px solid #06c977;border-radius:14px;text-align:center"><a href="https://kwvin81q.github.io/Reference-FedEx-Fleet/apps.html" style="display:block;padding:13px;color:#071510;background:#06c977;border-radius:10px;font-size:17px;font-weight:800;text-decoration:none">← ALL AIRCRAFT APPS</a></div>
 </main><script>
 const $=id=>document.getElementById(id);
 const docImages={};
@@ -221,7 +222,7 @@ $('export').onclick=()=>{let t=installed.map((p,i)=>`Hole ${i+1}: ${P[p]}`).join
 $('allStandard').onchange=()=>{if($('allStandard').checked&&isAllStandard()){screwConfirmation='standard'}else{screwConfirmation=null}refreshConfirmation()};
 $('updateWeights').onclick=()=>{screwConfirmation=null;refreshConfirmation();showTab('inventory');$('inventoryStatus').textContent='Review and update actual installed screws, then select CONFIRM INSTALLED WEIGHTS & RETURN.';};
 $('confirmInventory').onclick=()=>{screwConfirmation='inventory';refreshConfirmation();showTab('balance');$('result').textContent='38-hole inventory confirmed for this session. Enter vibration, phase and N1, then press CALCULATE.';};
-$('calc').onclick=requestCalculationPin;$('draft').onclick=()=>draft('manual');$('fig').onchange=()=>{$('figureNote').textContent='Selected figure: '+$('fig').selectedOptions[0].text+'. Consult controlled AMM for exact data.'};
+/* PIN handler is bound after the PIN dialog initializes. */$('draft').onclick=()=>draft('manual');$('fig').onchange=()=>{$('figureNote').textContent='Selected figure: '+$('fig').selectedOptions[0].text+'. Consult controlled AMM for exact data.'};
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 renderHoles();refreshConfirmation();
 </script>
@@ -262,6 +263,7 @@ async function md11Track(event,page){
 md11Track('open','home');
 document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>md11Track('page',b.dataset.tab)));
 const calcPinOverlay=document.getElementById('calcPinOverlay');
+document.getElementById('calc').onclick=requestCalculationPin;
 const calcPinEntry=document.getElementById('calcPinEntry');
 const calcPinMessage=document.getElementById('calcPinMessage');
 const calcPinVerify=document.getElementById('calcPinVerify');
