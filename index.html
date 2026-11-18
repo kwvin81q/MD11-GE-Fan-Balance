@@ -235,7 +235,7 @@ renderHoles();refreshConfirmation();
    fetch(endpoint, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({event, aircraft, visitor, eventId: crypto.randomUUID()}),
+    body: JSON.stringify({event, aircraft, visitor, app: 'md11-ge-vibe', eventId: crypto.randomUUID()}),
     keepalive: true,
     mode: 'cors'
    }).catch(() => {});
@@ -252,7 +252,7 @@ renderHoles();refreshConfirmation();
     localStorage.setItem(visitorKey, visitor);
    }
   } catch {}
-  track('vibe', 'md11', visitor);
+  track('vibe', 'md11-ge', visitor);
  } catch {}
 })();
 </script>
