@@ -221,39 +221,76 @@ $('export').onclick=()=>{let t=installed.map((p,i)=>`Hole ${i+1}: ${P[p]}`).join
 $('allStandard').onchange=()=>{if($('allStandard').checked&&isAllStandard()){screwConfirmation='standard'}else{screwConfirmation=null}refreshConfirmation()};
 $('updateWeights').onclick=()=>{screwConfirmation=null;refreshConfirmation();showTab('inventory');$('inventoryStatus').textContent='Review and update actual installed screws, then select CONFIRM INSTALLED WEIGHTS & RETURN.';};
 $('confirmInventory').onclick=()=>{screwConfirmation='inventory';refreshConfirmation();showTab('balance');$('result').textContent='38-hole inventory confirmed for this session. Enter vibration, phase and N1, then press CALCULATE.';};
-$('calc').onclick=calculate;$('draft').onclick=()=>draft('manual');$('fig').onchange=()=>{$('figureNote').textContent='Selected figure: '+$('fig').selectedOptions[0].text+'. Consult controlled AMM for exact data.'};
+$('calc').onclick=requestCalculationPin;$('draft').onclick=()=>draft('manual');$('fig').onchange=()=>{$('figureNote').textContent='Selected figure: '+$('fig').selectedOptions[0].text+'. Consult controlled AMM for exact data.'};
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 renderHoles();refreshConfirmation();
 </script>
+<style id="calc-pin-style">
+#calcPinOverlay{display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);align-items:center;justify-content:center;padding:16px}
+#calcPinOverlay.open{display:flex}
+#calcPinPanel{width:min(420px,100%);background:#10251e;border:2px solid #06c977;border-radius:18px;padding:22px;box-shadow:0 12px 60px #000;color:#e9f9f1}
+#calcPinPanel h2{font-size:21px}
+#calcPinPanel input{font-size:22px;letter-spacing:4px;width:100%;margin:8px 0}
+#calcPinPanel .pinButtons{display:flex;gap:10px;margin-top:12px}
+#calcPinPanel .pinButtons button{flex:1}
+#calcPinMessage{min-height:24px;color:#ffe1a6}
+</style>
+<div id="calcPinOverlay" role="dialog" aria-modal="true" aria-labelledby="calcPinHeading">
+ <div id="calcPinPanel">
+  <h2 id="calcPinHeading">MD-11 GE · Calculation PIN</h2>
+  <p>Enter the PIN configured in Fleet Usage to calculate.</p>
+  <form id="calcPinForm">
+   <label for="calcPinEntry">Calculation PIN</label>
+   <input id="calcPinEntry" type="password" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" autocomplete="off" required>
+   <p id="calcPinMessage" role="status" aria-live="polite"></p>
+   <div class="pinButtons"><button type="button" class="btn" id="calcPinCancel">Cancel</button><button type="submit" class="btn" id="calcPinVerify">Verify &amp; Calculate</button></div>
+  </form>
+ </div>
+</div>
 <script>
-(() => {
- const endpoint = 'https://aircraft-reference-usage.wgy9sy6b59.workers.dev/event';
- const visitorKey = 'acmx-reference-visitor-v1';
-
- function track(event, aircraft, visitor) {
-  try {
-   fetch(endpoint, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({event, aircraft, visitor, app: 'md11-ge-vibe', eventId: crypto.randomUUID()}),
-    keepalive: true,
-    mode: 'cors'
-   }).catch(() => {});
-  } catch {}
- }
-
- try {
-  let visitor = crypto.randomUUID();
-  try {
-   const saved = localStorage.getItem(visitorKey);
-   if (saved && saved.length >= 10 && saved.length <= 100) {
-    visitor = saved;
-   } else {
-    localStorage.setItem(visitorKey, visitor);
-   }
-  } catch {}
-  track('vibe', 'md11-ge', visitor);
- } catch {}
-})();
+const MD11_API='https://aircraft-reference-usage.wgy9sy6b59.workers.dev';
+const MD11_APP='md11-ge-vibe';
+const MD11_VISITOR_KEY='acmx-reference-visitor-v1';
+let md11Visitor;
+try{md11Visitor=localStorage.getItem(MD11_VISITOR_KEY);if(!md11Visitor||md11Visitor.length<10||md11Visitor.length>100){md11Visitor=crypto.randomUUID();localStorage.setItem(MD11_VISITOR_KEY,md11Visitor)}}catch{md11Visitor=crypto.randomUUID()}
+async function md11Track(event,page){
+ try{
+  const response=await fetch(MD11_API+'/app-event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event,app:MD11_APP,page,visitor:md11Visitor,eventId:crypto.randomUUID()}),keepalive:true,mode:'cors'});
+  if(!response.ok)console.warn('MD-11 GE event rejected',response.status,await response.text());
+ }catch(err){console.warn('MD-11 GE tracking failed',err)}
+}
+md11Track('open','home');
+document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>md11Track('page',b.dataset.tab)));
+const calcPinOverlay=document.getElementById('calcPinOverlay');
+const calcPinEntry=document.getElementById('calcPinEntry');
+const calcPinMessage=document.getElementById('calcPinMessage');
+const calcPinVerify=document.getElementById('calcPinVerify');
+function requestCalculationPin(){
+ md11Track('action','calculate_attempt');
+ calcPinEntry.value='';calcPinMessage.textContent='';calcPinOverlay.classList.add('open');calcPinEntry.focus();
+}
+function closeCalculationPin(){calcPinOverlay.classList.remove('open');calcPinEntry.value='';calcPinMessage.textContent=''}
+document.getElementById('calcPinCancel').addEventListener('click',()=>closeCalculationPin());
+document.getElementById('calcPinForm').addEventListener('submit',async e=>{
+ e.preventDefault();
+ const pin=calcPinEntry.value;
+ if(!/^\d{4,8}$/.test(pin)){calcPinMessage.textContent='Enter a 4–8 digit PIN.';return}
+ calcPinVerify.disabled=true;calcPinMessage.textContent='Checking PIN…';
+ try{
+  const response=await fetch(MD11_API+'/calc-pin/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin}),cache:'no-store',mode:'cors'});
+  const result=await response.json();
+  if(!response.ok)throw new Error(result.error||'PIN service unavailable');
+  if(!result.ok){
+   md11Track('action',result.configured===false?'pin_not_configured':'pin_failed');
+   calcPinMessage.textContent=result.configured===false?'No calculation PIN is configured in Fleet Usage.':'Incorrect PIN. Try again.';
+   calcPinEntry.value='';calcPinEntry.focus();return;
+  }
+  md11Track('action','pin_accepted');
+  closeCalculationPin();
+  calculate();
+  md11Track('action','calculate_executed');
+ }catch(err){md11Track('error','pin_check_failed');calcPinMessage.textContent='PIN verification unavailable. Calculation blocked. '+err.message}
+ finally{calcPinVerify.disabled=false}
+});
 </script>
 </body></html>
